@@ -21,11 +21,19 @@ Always-on-top quick capture into medaily’s journal. Talks HTTP only — **Sign
    pnpm tauri dev
    ```
 
-4. In **Settings**, set the API base URL (e.g. `http://localhost:3000` or your deploy).
-5. Click **Sign in** → finish in the browser (log in if needed → **Connect desktop app**) → the window picks up the session automatically.
+4. Click **Sign in with browser** → finish in the browser (log in if needed → **Connect**) → the note screen opens.
 
-**Sign out** clears the token on this device only.
+API is fixed to `https://medaily.id.vn`. **Sign out** clears the session on this device only.
 
-Optional: **Paste token instead** still accepts a token from `pnpm exec tsx scripts/note-grant-token.ts`.
+### Fast open + many windows
+
+`tauri dev` is slow (Vite + debug Rust). For daily use, build once:
+
+```bash
+pnpm tauri build
+# binary e.g. src-tauri/target/release/desktop  (or the .deb in bundle/)
+```
+
+Then launch that binary (or pin it). After sign-in, **New** / `Ctrl+N` opens another note window; session is shared via localStorage.
 
 The parent Next app does not build this package.

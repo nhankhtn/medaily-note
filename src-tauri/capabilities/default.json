@@ -1,7 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
-  "permissions": ["core:default", "opener:default"]
+  "description": "Capability for every note window",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-set-icon",
+    "opener:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://medaily.id.vn/*" }]
+    }
+  ]
 }

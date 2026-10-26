@@ -2,6 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/src/assets/app-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,650&family=Source+Sans+3:wght@420;560;650&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Quick note</title>
@@ -9,60 +16,133 @@
   </head>
   <body>
     <main class="shell">
-      <header class="bar">
-        <h1>Quick note</h1>
-        <button type="button" id="toggle-settings" class="ghost" aria-expanded="false">
-          Settings
-        </button>
-      </header>
-
-      <section id="settings" class="settings" hidden>
-        <label>
-          API base URL
-          <input
-            id="api-base"
-            type="url"
-            placeholder="https://your-medaily.example"
-            autocomplete="off"
-            spellcheck="false"
-          />
-        </label>
-        <div class="auth-row">
-          <p id="auth-state" class="auth-state">Not signed in</p>
-          <button type="button" id="sign-in">Sign in</button>
-          <button type="button" id="sign-out" class="ghost" hidden>Sign out</button>
+      <section id="gate" class="gate">
+        <div class="gate-card">
+          <img class="gate-icon" src="/src/assets/app-icon.png" width="48" height="48" alt="" />
+          <p class="brand-mark">medaily</p>
+          <h1>Quick note</h1>
+          <p class="gate-copy">Sign in once on this device to save notes to your journal.</p>
+          <button type="button" id="sign-in" class="primary gate-cta">Sign in with browser</button>
+          <p id="gate-status" class="gate-status" role="status" aria-live="polite"></p>
         </div>
-        <button type="button" id="save-settings" class="ghost">Save URL</button>
-        <details class="advanced">
-          <summary>Paste token instead</summary>
-          <label>
-            Note grant token
-            <textarea
-              id="token"
-              rows="3"
-              placeholder="From note-grant-token.ts (optional)"
-              autocomplete="off"
-              spellcheck="false"
-            ></textarea>
-          </label>
-          <button type="button" id="save-token" class="ghost">Save token</button>
-        </details>
       </section>
 
-      <form id="note-form" class="note">
-        <label>
-          Title <span class="hint">(optional)</span>
-          <input id="title" type="text" maxlength="200" autocomplete="off" />
-        </label>
-        <label class="grow">
-          Note
-          <textarea id="body" rows="8" required maxlength="200000"></textarea>
-        </label>
-        <div class="actions">
-          <p id="status" role="status" aria-live="polite"></p>
-          <button type="submit" id="save-note">Save</button>
-        </div>
-      </form>
+      <section id="app" class="app" hidden>
+        <header class="bar">
+          <div class="brand">
+            <img class="brand-icon" src="/src/assets/app-icon.png" width="28" height="28" alt="" />
+            <div>
+              <p class="brand-mark">medaily</p>
+              <h1>Quick note</h1>
+            </div>
+          </div>
+          <div class="bar-actions">
+            <button type="button" id="open-notes" class="ghost icon-action" title="Open a note">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
+                />
+              </svg>
+              <span>Notes</span>
+            </button>
+            <button type="button" id="new-note" class="ghost icon-action" title="New note">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  d="M12 5v14M5 12h14"
+                />
+              </svg>
+              <span>New note</span>
+            </button>
+            <button type="button" id="new-window" class="ghost icon-only" title="New window (Ctrl+N)" aria-label="New window">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M8 3h9a2 2 0 0 1 2 2v9M4 8v11a2 2 0 0 0 2 2h11"
+                />
+              </svg>
+            </button>
+            <button type="button" id="sign-out" class="ghost icon-only" title="Sign out" aria-label="Sign out">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M10 7V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-2M15 12H3m0 0 3-3M3 12l3 3"
+                />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <section id="notes-panel" class="notes-panel" hidden>
+          <div class="notes-panel-head">
+            <p>Your notes</p>
+            <button type="button" id="close-notes" class="ghost icon-only" title="Close" aria-label="Close">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  d="M6 6l12 12M18 6 6 18"
+                />
+              </svg>
+            </button>
+          </div>
+          <p id="notes-status" class="notes-status" role="status"></p>
+          <ul id="notes-list" class="notes-list"></ul>
+        </section>
+
+        <form id="note-form" class="note">
+          <p id="editing-label" class="editing-label" hidden>New note</p>
+          <input
+            id="title"
+            type="text"
+            maxlength="200"
+            autocomplete="off"
+            placeholder="Title (optional)"
+          />
+          <div class="md-bar" role="toolbar" aria-label="Markdown">
+            <button type="button" class="md-btn" data-md="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+            <button type="button" class="md-btn" data-md="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+            <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
+            <button type="button" class="md-btn" data-md="list" title="List">•</button>
+            <button type="button" class="md-btn" data-md="code" title="Code">&lt;/&gt;</button>
+            <button type="button" class="md-btn" data-md="link" title="Link">Link</button>
+            <span class="md-spacer"></span>
+            <button type="button" id="toggle-preview" class="md-btn md-toggle" title="Preview">
+              Preview
+            </button>
+          </div>
+          <textarea
+            id="body"
+            rows="10"
+            required
+            maxlength="200000"
+            placeholder="Markdown welcome — **bold**, lists, `code`…"
+          ></textarea>
+          <div id="preview" class="md-preview" hidden></div>
+          <div class="actions">
+            <p id="status" role="status" aria-live="polite"></p>
+            <button type="submit" id="save-note" class="primary">Save</button>
+          </div>
+        </form>
+      </section>
     </main>
   </body>
 </html>
