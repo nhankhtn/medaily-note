@@ -1,39 +1,43 @@
 # Medaily Note (desktop)
 
-Always-on-top quick capture into medaily’s journal. Talks HTTP only — **Sign in** in the app opens your browser; no `DATABASE_URL`, no pasted token required.
+Always-on-top quick capture into medaily learning notes. Talks HTTP only — **Sign in** opens the browser; no `DATABASE_URL`, no pasted token.
 
-## Setup
+## Download (for others)
 
-1. Migrate the API database (once):
+CI builds Windows / macOS / Linux and attaches installers to a [GitHub Release](https://github.com/nhankhtn/medaily/releases):
 
-   ```bash
-   cd ..
-   pnpm db:migrate
-   ```
+1. Repo → **Actions** → **Desktop release** → **Run workflow**,  
+   or tag: `git tag desktop-v0.1.0 && git push origin desktop-v0.1.0`
+2. When the job finishes, open the release **Medaily Note v…** and download:
+   - Windows → `.msi` / `.exe`
+   - macOS → `.dmg` (pick Apple Silicon or Intel)
+   - Linux → `.deb` / `.AppImage`
+3. Install, open the app, **Sign in with browser** once.
 
-2. Install Linux **dev** packages if needed: [Tauri prerequisites](https://tauri.app/start/prerequisites/) (`libwebkit2gtk-4.1-dev`, `libsoup-3.0-dev`, …).
+Unsigned macOS builds may need: right-click → Open, or  
+`xattr -cr "/Applications/Medaily Note.app"` if Gatekeeper blocks it.
 
-3. Run the desktop app:
+## Dev setup
+
+1. Migrate the API database (once): `cd .. && pnpm db:migrate`
+2. Linux deps if needed: [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+3. Run:
 
    ```bash
    pnpm install
-   source "$HOME/.cargo/env"   # if `cargo` is missing
+   source "$HOME/.cargo/env"   # if cargo is missing
    pnpm tauri dev
    ```
 
-4. Click **Sign in with browser** → finish in the browser (log in if needed → **Connect**) → the note screen opens.
+API is fixed to `https://medaily.id.vn`. **Sign out** clears the local token only.
 
-API is fixed to `https://medaily.id.vn`. **Sign out** clears the session on this device only.
-
-### Fast open + many windows
-
-`tauri dev` is slow (Vite + debug Rust). For daily use, build once:
+### Local release binary
 
 ```bash
 pnpm tauri build
-# binary e.g. src-tauri/target/release/desktop  (or the .deb in bundle/)
+# → src-tauri/target/release/bundle/  (.deb / AppImage / …)
 ```
 
-Then launch that binary (or pin it). After sign-in, **New** / `Ctrl+N` opens another note window; session is shared via localStorage.
+**New** / `Ctrl+N` opens another window; session is shared via localStorage.
 
 The parent Next app does not build this package.
