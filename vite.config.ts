@@ -4,6 +4,13 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
+  // Desktop CSS is plain CSS. An inline config stops Vite from walking up to the
+  // app PostCSS config, which needs @tailwindcss/postcss (not installed here).
+  css: {
+    postcss: {
+      plugins: [],
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

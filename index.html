@@ -37,19 +37,6 @@
             </div>
           </div>
           <div class="bar-actions">
-            <button type="button" id="open-notes" class="ghost icon-action" title="Open a note">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
-                />
-              </svg>
-              <span>Notes</span>
-            </button>
             <button type="button" id="new-note" class="ghost icon-action" title="New note">
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                 <path
@@ -60,7 +47,7 @@
                   d="M12 5v14M5 12h14"
                 />
               </svg>
-              <span>New note</span>
+              <span>New</span>
             </button>
             <button type="button" id="new-window" class="ghost icon-only" title="New window (Ctrl+N)" aria-label="New window">
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -89,26 +76,27 @@
           </div>
         </header>
 
-        <section id="notes-panel" class="notes-panel" hidden>
-          <div class="notes-panel-head">
-            <p>Your notes</p>
-            <button type="button" id="close-notes" class="ghost icon-only" title="Close" aria-label="Close">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  d="M6 6l12 12M18 6 6 18"
-                />
-              </svg>
-            </button>
-          </div>
-          <p id="notes-status" class="notes-status" role="status"></p>
-          <ul id="notes-list" class="notes-list"></ul>
-        </section>
-
         <form id="note-form" class="note">
+          <div class="notes-combo" id="notes-combo">
+            <input
+              id="notes-search"
+              class="notes-search"
+              type="search"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Search notes…"
+              aria-autocomplete="list"
+              aria-controls="notes-menu"
+              aria-expanded="false"
+            />
+            <div id="notes-menu" class="notes-menu" hidden role="listbox">
+              <button type="button" id="notes-new" class="notes-menu-new" role="option">
+                New note…
+              </button>
+              <ul id="notes-results" class="notes-results"></ul>
+              <p id="notes-status" class="notes-status" role="status"></p>
+            </div>
+          </div>
           <p id="editing-label" class="editing-label" hidden>New note</p>
           <input
             id="title"
@@ -125,6 +113,8 @@
             <button type="button" class="md-btn" data-md="code" title="Code">&lt;/&gt;</button>
             <button type="button" class="md-btn" data-md="link" title="Link">Link</button>
             <span class="md-spacer"></span>
+            <button type="button" id="font-smaller" class="md-btn" title="Smaller text" aria-label="Smaller text">A−</button>
+            <button type="button" id="font-larger" class="md-btn" title="Larger text" aria-label="Larger text">A+</button>
             <button type="button" id="toggle-preview" class="md-btn md-toggle" title="Preview">
               Preview
             </button>

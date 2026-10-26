@@ -8,7 +8,12 @@ import appIcon from './assets/app-icon.png'
 marked.setOptions({ gfm: true, breaks: true })
 
 const STORAGE_KEY = 'medaily.quicknote.session'
+const FONT_KEY = 'medaily.quicknote.fontSize'
 const API_BASE = 'https://medaily.id.vn'
+const FONT_MIN = 0.8
+const FONT_MAX = 1.45
+const FONT_STEP = 0.05
+const FONT_DEFAULT = 0.95
 
 type Session = {
   noteGrantToken: string
@@ -29,6 +34,19 @@ function loadSession(): Session {
 
 function saveSession(session: Session) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+}
+
+function loadFontSize(): number {
+  const raw = Number(localStorage.getItem(FONT_KEY))
+  if (!Number.isFinite(raw)) return FONT_DEFAULT
+  return Math.min(FONT_MAX, Math.max(FONT_MIN, raw))
+}
+
+function applyFontSize(rem: number) {
+  const next = Math.round(Math.min(FONT_MAX, Math.max(FONT_MIN, rem)) * 100) / 100
+  document.documentElement.style.setProperty('--editor-size', `${next}rem`)
+  localStorage.setItem(FONT_KEY, String(next))
+  return next
 }
 
 function setStatus(el: HTMLElement, message: string, kind: 'idle' | 'ok' | 'error') {
@@ -183,11 +201,12 @@ window.addEventListener('DOMContentLoaded', () => {
   const signIn = document.querySelector<HTMLButtonElement>('#sign-in')!
   const signOut = document.querySelector<HTMLButtonElement>('#sign-out')!
   const newWindow = document.querySelector<HTMLButtonElement>('#new-window')!
-  const openNotes = document.querySelector<HTMLButtonElement>('#open-notes')!
-  const closeNotes = document.querySelector<HTMLButtonElement>('#close-notes')!
   const newNote = document.querySelector<HTMLButtonElement>('#new-note')!
-  const notesPanel = document.querySelector<HTMLElement>('#notes-panel')!
-  const notesList = document.querySelector<HTMLElement>('#notes-list')!
+  const notesCombo = document.querySelector<HTMLElement>('#notes-combo')!
+  const notesSearch = document.querySelector<HTMLInputElement>('#notes-search')!
+  const notesMenu = document.querySelector<HTMLElement>('#notes-menu')!
+  const notesResults = document.querySelector<HTMLElement>('#notes-results')!
+  const notesNew = document.querySelector<HTMLButtonElement>('#notes-new')!
   const notesStatus = document.querySelector<HTMLElement>('#notes-status')!
   const editingLabel = document.querySelector<HTMLElement>('#editing-label')!
   const gateStatus = document.querySelector<HTMLElement>('#gate-status')!
@@ -196,11 +215,10 @@ window.addEventListener('DOMContentLoaded', () => {
   const body = document.querySelector<HTMLTextAreaElement>('#body')!
   const preview = document.querySelector<HTMLElement>('#preview')!
   const togglePreview = document.querySelector<HTMLButtonElement>('#toggle-preview')!
+  const fontSmaller = document.querySelector<HTMLButtonElement>('#font-smaller')!
+  const fontLarger = document.querySelector<HTMLButtonElement>('#font-larger')!
   const saveNote = document.querySelector<HTMLButtonElement>('#save-note')!
   const status = document.querySelector<HTMLElement>('#status')!
-
-  let previewOn = false
-  let editingId: string | null = null
 
   type ListedNote = {
     id: string
@@ -209,24 +227,79 @@ window.addEventListener('DOMContentLoaded', () => {
     updatedAt: string
   }
 
+  type NotesCursor = { updatedAt: string; id: string }
+
+  let previewOn = false
+  let editingId: string | null = null
+  let listedNotes: ListedNote[] = []
+  let nextCursor: NotesCursor | null = null
+  let activeQuery = ''
+  let loadingNotes = false
+  let searchTimer: number | null = null
+  let fontSize = applyFontSize(loadFontSize())
+
   function snippet(text: string): string {
     return text.replace(/\s+/g, ' ').trim().slice(0, 80)
+  }
+
+  function noteLabel(entry: ListedNote): string {
+    return entry.title?.trim() || snippet(entry.bodyMd) || 'Untitled'
+  }
+
+  function noteMeta(entry: ListedNote): string {
+    const when = new Date(entry.updatedAt)
+    const date = Number.isNaN(when.getTime())
+      ? ''
+      : when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    const snip = snippet(entry.bodyMd)
+    return [date, snip].filter(Boolean).join(' · ')
+  }
+
+  function setMenuOpen(open: boolean) {
+    notesMenu.hidden = !open
+    notesSearch.setAttribute('aria-expanded', open ? 'true' : 'false')
+  }
+
+  function renderNotesResults(reset: boolean) {
+    if (reset) notesResults.replaceChildren()
+    const start = reset ? 0 : notesResults.childElementCount
+    for (const entry of listedNotes.slice(start)) {
+      const item = document.createElement('li')
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.role = 'option'
+      button.dataset.id = entry.id
+      if (entry.id === editingId) button.classList.add('is-active')
+      button.innerHTML = `<span class="note-title"></span><span class="note-meta"></span>`
+      button.querySelector('.note-title')!.textContent = noteLabel(entry)
+      button.querySelector('.note-meta')!.textContent = noteMeta(entry)
+      button.addEventListener('click', () => {
+        loadNoteIntoComposer(entry)
+        setMenuOpen(false)
+      })
+      item.append(button)
+      notesResults.append(item)
+    }
   }
 
   function refreshEditingLabel() {
     if (!editingId) {
       editingLabel.hidden = true
       editingLabel.textContent = 'New note'
+      notesSearch.placeholder = 'Search notes…'
       return
     }
     editingLabel.hidden = false
     editingLabel.textContent = 'Editing note'
+    const current = listedNotes.find((note) => note.id === editingId)
+    notesSearch.placeholder = current ? noteLabel(current) : 'Editing note…'
   }
 
   function clearComposer() {
     editingId = null
     title.value = ''
     body.value = ''
+    notesSearch.value = ''
     refreshEditingLabel()
     void setPreviewMode(false)
   }
@@ -235,30 +308,37 @@ window.addEventListener('DOMContentLoaded', () => {
     editingId = entry.id
     title.value = entry.title ?? ''
     body.value = entry.bodyMd
+    notesSearch.value = ''
     refreshEditingLabel()
-    notesPanel.hidden = true
     void setPreviewMode(false)
     body.focus()
     setStatus(status, 'Editing existing note.', 'idle')
   }
 
-  async function loadNotesList() {
+  async function fetchNotesPage(opts: { reset: boolean; q: string }) {
     const bearer = loadSession().noteGrantToken.trim()
     if (!bearer) {
       showScreen(gate, app, false)
       return
     }
+    if (loadingNotes) return
+    if (!opts.reset && !nextCursor) return
 
-    notesStatus.textContent = 'Loading…'
-    notesList.replaceChildren()
+    loadingNotes = true
+    notesStatus.textContent = opts.reset ? 'Searching…' : 'Loading more…'
 
     try {
-      const response = await fetch(`${API_BASE}/api/external/grant/journal?limit=40`, {
+      const params = new URLSearchParams({ limit: '20' })
+      if (opts.q) params.set('q', opts.q)
+      if (!opts.reset && nextCursor) params.set('cursor', JSON.stringify(nextCursor))
+
+      const response = await fetch(`${API_BASE}/api/external/grant/journal?${params}`, {
         headers: { Authorization: `Bearer ${bearer}` },
       })
       const payload = (await response.json().catch(() => null)) as {
         ok?: boolean
         entries?: ListedNote[]
+        nextCursor?: NotesCursor | null
         error?: string
       } | null
 
@@ -273,32 +353,42 @@ window.addEventListener('DOMContentLoaded', () => {
         return
       }
 
-      if (payload.entries.length === 0) {
-        notesStatus.textContent = 'No notes yet.'
-        return
+      if (opts.reset) listedNotes = payload.entries
+      else {
+        const seen = new Set(listedNotes.map((note) => note.id))
+        for (const entry of payload.entries) {
+          if (!seen.has(entry.id)) listedNotes.push(entry)
+        }
       }
+      nextCursor = payload.nextCursor ?? null
+      activeQuery = opts.q
+      renderNotesResults(opts.reset)
+      refreshEditingLabel()
 
-      notesStatus.textContent = `${payload.entries.length} recent`
-      for (const entry of payload.entries) {
-        const item = document.createElement('li')
-        const button = document.createElement('button')
-        button.type = 'button'
-        if (entry.id === editingId) button.classList.add('is-active')
-        const when = new Date(entry.updatedAt)
-        const dateLabel = Number.isNaN(when.getTime())
-          ? ''
-          : when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-        button.innerHTML = `<span class="note-date"></span><span class="note-title"></span><span class="note-snip"></span>`
-        button.querySelector('.note-date')!.textContent = dateLabel
-        button.querySelector('.note-title')!.textContent =
-          entry.title?.trim() || snippet(entry.bodyMd) || 'Untitled'
-        button.querySelector('.note-snip')!.textContent = snippet(entry.bodyMd)
-        button.addEventListener('click', () => loadNoteIntoComposer(entry))
-        item.append(button)
-        notesList.append(item)
+      if (listedNotes.length === 0) {
+        notesStatus.textContent = opts.q ? 'No matches.' : 'No notes yet.'
+      } else if (nextCursor) {
+        notesStatus.textContent = 'Scroll for more…'
+      } else {
+        notesStatus.textContent = ''
       }
     } catch (error) {
       notesStatus.textContent = networkErrorMessage(error)
+    } finally {
+      loadingNotes = false
+    }
+  }
+
+  function openNotesMenu(resetQuery = false) {
+    setMenuOpen(true)
+    if (resetQuery) {
+      nextCursor = null
+      void fetchNotesPage({ reset: true, q: notesSearch.value.trim() })
+      return
+    }
+    if (listedNotes.length === 0 || notesSearch.value.trim() !== activeQuery) {
+      nextCursor = null
+      void fetchNotesPage({ reset: true, q: notesSearch.value.trim() })
     }
   }
 
@@ -343,26 +433,58 @@ window.addEventListener('DOMContentLoaded', () => {
 
   signOut.addEventListener('click', () => {
     saveSession({ noteGrantToken: '' })
+    listedNotes = []
+    nextCursor = null
+    notesResults.replaceChildren()
+    setMenuOpen(false)
     clearComposer()
-    notesPanel.hidden = true
+    notesStatus.textContent = ''
     showScreen(gate, app, false)
     setStatus(gateStatus, '', 'idle')
     setStatus(status, '', 'idle')
   })
 
-  openNotes.addEventListener('click', () => {
-    const open = notesPanel.hidden
-    notesPanel.hidden = !open
-    if (open) void loadNotesList()
+  notesSearch.addEventListener('focus', () => openNotesMenu())
+
+  notesSearch.addEventListener('input', () => {
+    setMenuOpen(true)
+    if (searchTimer !== null) window.clearTimeout(searchTimer)
+    searchTimer = window.setTimeout(() => {
+      nextCursor = null
+      void fetchNotesPage({ reset: true, q: notesSearch.value.trim() })
+    }, 220)
   })
 
-  closeNotes.addEventListener('click', () => {
-    notesPanel.hidden = true
+  notesMenu.addEventListener('scroll', () => {
+    if (!nextCursor || loadingNotes) return
+    const nearBottom =
+      notesMenu.scrollTop + notesMenu.clientHeight >= notesMenu.scrollHeight - 48
+    if (nearBottom) void fetchNotesPage({ reset: false, q: activeQuery })
+  })
+
+  notesNew.addEventListener('click', () => {
+    clearComposer()
+    setMenuOpen(false)
+    setStatus(status, 'New note.', 'idle')
+    body.focus()
+  })
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!(event.target instanceof Node)) return
+    if (!notesCombo.contains(event.target)) setMenuOpen(false)
+  })
+
+  fontSmaller.addEventListener('click', () => {
+    fontSize = applyFontSize(fontSize - FONT_STEP)
+  })
+
+  fontLarger.addEventListener('click', () => {
+    fontSize = applyFontSize(fontSize + FONT_STEP)
   })
 
   newNote.addEventListener('click', () => {
     clearComposer()
-    notesPanel.hidden = true
+    setMenuOpen(false)
     setStatus(status, 'New note.', 'idle')
     body.focus()
   })
@@ -490,8 +612,10 @@ window.addEventListener('DOMContentLoaded', () => {
       editingId = payload.id ?? editingId
       refreshEditingLabel()
       if (previewOn) await renderPreview(body.value, preview)
-      setStatus(status, editingId ? 'Saved.' : 'Saved to journal.', 'ok')
-      if (!notesPanel.hidden) void loadNotesList()
+      setStatus(status, 'Saved.', 'ok')
+      nextCursor = null
+      listedNotes = []
+      refreshEditingLabel()
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         setStatus(status, 'Timed out reaching the API.', 'error')
