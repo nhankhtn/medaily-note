@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quick note</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="bar">
+        <h1>Quick note</h1>
+        <button type="button" id="toggle-settings" class="ghost" aria-expanded="false">
+          Settings
+        </button>
+      </header>
+
+      <section id="settings" class="settings" hidden>
+        <label>
+          API base URL
+          <input
+            id="api-base"
+            type="url"
+            placeholder="https://your-medaily.example"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+        <div class="auth-row">
+          <p id="auth-state" class="auth-state">Not signed in</p>
+          <button type="button" id="sign-in">Sign in</button>
+          <button type="button" id="sign-out" class="ghost" hidden>Sign out</button>
+        </div>
+        <button type="button" id="save-settings" class="ghost">Save URL</button>
+        <details class="advanced">
+          <summary>Paste token instead</summary>
+          <label>
+            Note grant token
+            <textarea
+              id="token"
+              rows="3"
+              placeholder="From note-grant-token.ts (optional)"
+              autocomplete="off"
+              spellcheck="false"
+            ></textarea>
+          </label>
+          <button type="button" id="save-token" class="ghost">Save token</button>
+        </details>
+      </section>
+
+      <form id="note-form" class="note">
+        <label>
+          Title <span class="hint">(optional)</span>
+          <input id="title" type="text" maxlength="200" autocomplete="off" />
+        </label>
+        <label class="grow">
+          Note
+          <textarea id="body" rows="8" required maxlength="200000"></textarea>
+        </label>
+        <div class="actions">
+          <p id="status" role="status" aria-live="polite"></p>
+          <button type="submit" id="save-note">Save</button>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>
