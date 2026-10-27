@@ -12,6 +12,7 @@ import {
   type NotesCursor as LocalNotesCursor,
 } from './local-notes'
 import { applyMarkdownAction, createNoteEditor, isActionOn, markdownOf, setMarkdown } from './editor'
+import { offerUpdate } from './updater'
 
 const STORAGE_KEY = 'medaily.quicknote.session'
 const SAVE_TO_KEY = 'medaily.quicknote.saveTo'
@@ -167,6 +168,11 @@ async function pollForToken(
 
 window.addEventListener('DOMContentLoaded', () => {
   void applyWindowIcon()
+  void offerUpdate(
+    document.querySelector<HTMLElement>('#update-bar')!,
+    document.querySelector<HTMLElement>('#update-text')!,
+    document.querySelector<HTMLButtonElement>('#update-install')!,
+  )
 
   const gate = document.querySelector<HTMLElement>('#gate')!
   const app = document.querySelector<HTMLElement>('#app')!

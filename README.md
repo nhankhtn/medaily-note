@@ -4,24 +4,23 @@ Always-on-top quick capture into medaily learning notes. Talks HTTP only — **S
 
 ## Download (for others)
 
-CI builds Windows / macOS / Linux and attaches installers to a [GitHub Release](https://github.com/nhankhtn/medaily/releases):
+Installers are on [Releases](https://github.com/nhankhtn/medaily-note/releases/latest):
 
-1. Repo → **Actions** → **Desktop release** → **Run workflow**,  
-   or tag: `git tag desktop-v0.1.0 && git push origin desktop-v0.1.0`
-2. When the job finishes, open the release **Medaily Note v…** and download:
-   - Windows → `.msi` / `.exe`
-   - macOS → `.dmg` (pick Apple Silicon or Intel)
-   - Linux → `.deb` / `.AppImage`
-3. Install, open the app, **Sign in with browser** once.
+- Windows → `.msi` / `.exe`
+- macOS → `.dmg` (pick Apple Silicon or Intel)
+- Linux → `.deb` / `.AppImage`
+
+Install, open the app, **Sign in with browser** once. Later versions are offered inside the app.
 
 Unsigned macOS builds may need: right-click → Open, or  
 `xattr -cr "/Applications/Medaily Note.app"` if Gatekeeper blocks it.
 
 ## Dev setup
 
-1. Migrate the API database (once): `cd .. && pnpm db:migrate`
-2. Linux deps if needed: [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
-3. Run:
+The API lives in the medaily web app; this repo only talks to `https://medaily.id.vn`.
+
+1. Linux deps if needed: [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+2. Run:
 
    ```bash
    pnpm install
@@ -36,8 +35,16 @@ API is fixed to `https://medaily.id.vn`. **Sign out** clears the local token onl
 ```bash
 pnpm tauri build
 # → src-tauri/target/release/bundle/  (.deb / AppImage / …)
+# Needs TAURI_SIGNING_PRIVATE_KEY in the env: updater artifacts are signed on every build.
 ```
 
 **New** / `Ctrl+N` opens another window; session is shared via localStorage.
 
-The parent Next app does not build this package.
+## Releasing
+
+1. Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
+2. `git tag v<version> && git push origin v<version>` — CI builds every OS and publishes the release with `latest.json`.
+
+The app only installs updates signed by the updater key: `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in repo secrets, public half in `tauri.conf.json`.
+Losing the private key means every installed copy must be reinstalled by hand.
