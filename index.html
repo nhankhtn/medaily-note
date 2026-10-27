@@ -115,22 +115,12 @@
             <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
             <button type="button" class="md-btn" data-md="list" title="List">•</button>
             <button type="button" class="md-btn" data-md="code" title="Code">&lt;/&gt;</button>
-            <button type="button" class="md-btn" data-md="link" title="Link">Link</button>
+            <button type="button" class="md-btn" data-md="link" title="Link (select text first)">Link</button>
             <span class="md-spacer"></span>
             <button type="button" id="font-smaller" class="md-btn" title="Smaller text" aria-label="Smaller text">A−</button>
             <button type="button" id="font-larger" class="md-btn" title="Larger text" aria-label="Larger text">A+</button>
-            <button type="button" id="toggle-preview" class="md-btn md-toggle" title="Preview">
-              Preview
-            </button>
           </div>
-          <textarea
-            id="body"
-            rows="10"
-            required
-            maxlength="200000"
-            placeholder="Markdown welcome — **bold**, lists, `code`…"
-          ></textarea>
-          <div id="preview" class="md-preview" hidden></div>
+          <div id="body"></div>
           <div class="actions">
             <p id="status" role="status" aria-live="polite"></p>
             <div id="save-target" class="save-target" hidden role="group" aria-label="Save destination">

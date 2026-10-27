@@ -408,38 +408,72 @@ textarea {
 }
 
 .note #body {
+  display: flex;
   flex: 1;
-  min-height: 9rem;
-  background: transparent;
-  border: 0;
-  resize: none;
-  padding-top: 0.45rem;
-  font-family: "Source Sans 3", ui-monospace, monospace;
-  font-size: var(--editor-size);
-  line-height: 1.45;
-}
-
-.md-preview {
-  flex: 1;
+  flex-direction: column;
   min-height: 9rem;
   overflow: auto;
+}
+
+.md-doc {
+  flex: 1;
   padding: 0.45rem 0.55rem 0.2rem;
   color: var(--ink);
   font-size: var(--editor-size);
   line-height: 1.5;
+  outline: none;
+  overflow-wrap: anywhere;
 }
 
-.md-preview > :first-child {
+.md-doc p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: #8a968e;
+  pointer-events: none;
+}
+
+.md-doc ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.2rem;
+}
+
+.md-doc ul[data-type="taskList"] li {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+}
+
+.md-doc ul[data-type="taskList"] li > label {
+  margin-top: 0.2em;
+}
+
+.md-doc ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+
+.md-doc ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.md-doc hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0.8em 0;
+}
+
+.md-doc > :first-child {
   margin-top: 0;
 }
 
-.md-preview > :last-child {
+.md-doc > :last-child {
   margin-bottom: 0;
 }
 
-.md-preview h1,
-.md-preview h2,
-.md-preview h3 {
+.md-doc h1,
+.md-doc h2,
+.md-doc h3 {
   font-family: "Fraunces", Georgia, serif;
   font-weight: 560;
   letter-spacing: -0.02em;
@@ -447,32 +481,32 @@ textarea {
   margin: 0.85em 0 0.35em;
 }
 
-.md-preview h1 {
+.md-doc h1 {
   font-size: 1.25rem;
 }
 
-.md-preview h2 {
+.md-doc h2 {
   font-size: 1.1rem;
 }
 
-.md-preview h3 {
+.md-doc h3 {
   font-size: 1rem;
 }
 
-.md-preview p,
-.md-preview ul,
-.md-preview ol,
-.md-preview pre,
-.md-preview blockquote {
+.md-doc p,
+.md-doc ul,
+.md-doc ol,
+.md-doc pre,
+.md-doc blockquote {
   margin: 0.45em 0;
 }
 
-.md-preview ul,
-.md-preview ol {
+.md-doc ul,
+.md-doc ol {
   padding-left: 1.25rem;
 }
 
-.md-preview code {
+.md-doc code {
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 0.86em;
   background: var(--wash);
@@ -480,23 +514,23 @@ textarea {
   padding: 0.05em 0.3em;
 }
 
-.md-preview pre {
+.md-doc pre {
   background: var(--wash);
   border-radius: 0.55rem;
   padding: 0.55rem 0.65rem;
   overflow: auto;
 }
 
-.md-preview pre code {
+.md-doc pre code {
   background: transparent;
   padding: 0;
 }
 
-.md-preview a {
+.md-doc a {
   color: var(--accent);
 }
 
-.md-preview blockquote {
+.md-doc blockquote {
   border-left: 3px solid var(--line);
   padding-left: 0.7rem;
   color: var(--muted);
@@ -514,8 +548,7 @@ textarea:focus {
   background: #fff;
 }
 
-.note #title:focus,
-.note #body:focus {
+.note #title:focus {
   background: transparent;
   border-color: transparent;
   border-bottom-color: color-mix(in srgb, var(--accent) 40%, var(--line));

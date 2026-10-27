@@ -2,7 +2,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { fetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { marked } from 'marked'
 import appIcon from './assets/app-icon.png'
 import {
   ensureLocalNotesDb,
@@ -12,8 +11,7 @@ import {
   upsertLocalNote,
   type NotesCursor as LocalNotesCursor,
 } from './local-notes'
-
-marked.setOptions({ gfm: true, breaks: true })
+import { applyMarkdownAction, createNoteEditor, isActionOn, markdownOf, setMarkdown } from './editor'
 
 const STORAGE_KEY = 'medaily.quicknote.session'
 const SAVE_TO_KEY = 'medaily.quicknote.saveTo'
@@ -125,61 +123,6 @@ function networkErrorMessage(error: unknown): string {
   return message || 'Sign-in failed.'
 }
 
-function wrapSelection(
-  area: HTMLTextAreaElement,
-  before: string,
-  after = before,
-  placeholder = 'text',
-) {
-  const start = area.selectionStart
-  const end = area.selectionEnd
-  const selected = area.value.slice(start, end) || placeholder
-  const next = area.value.slice(0, start) + before + selected + after + area.value.slice(end)
-  area.value = next
-  const selectFrom = start + before.length
-  area.focus()
-  area.setSelectionRange(selectFrom, selectFrom + selected.length)
-  area.dispatchEvent(new Event('input', { bubbles: true }))
-}
-
-function applyMarkdownAction(area: HTMLTextAreaElement, action: string) {
-  switch (action) {
-    case 'bold':
-      wrapSelection(area, '**', '**', 'bold')
-      break
-    case 'italic':
-      wrapSelection(area, '_', '_', 'italic')
-      break
-    case 'heading':
-      wrapSelection(area, '## ', '', 'Heading')
-      break
-    case 'list': {
-      const start = area.selectionStart
-      const end = area.selectionEnd
-      const block = area.value.slice(start, end) || 'item'
-      const listed = block
-        .split('\n')
-        .map((line) => (line.startsWith('- ') ? line : `- ${line}`))
-        .join('\n')
-      area.value = area.value.slice(0, start) + listed + area.value.slice(end)
-      area.focus()
-      area.setSelectionRange(start, start + listed.length)
-      area.dispatchEvent(new Event('input', { bubbles: true }))
-      break
-    }
-    case 'code':
-      wrapSelection(area, '`', '`', 'code')
-      break
-    case 'link':
-      wrapSelection(area, '[', '](https://)', 'label')
-      break
-  }
-}
-
-async function renderPreview(source: string, target: HTMLElement) {
-  target.innerHTML = await marked.parse(source || '_Nothing to preview yet._')
-}
-
 async function pollForToken(
   deviceCode: string,
   intervalSec: number,
@@ -242,9 +185,12 @@ window.addEventListener('DOMContentLoaded', () => {
   const gateStatus = document.querySelector<HTMLElement>('#gate-status')!
   const form = document.querySelector<HTMLFormElement>('#note-form')!
   const title = document.querySelector<HTMLInputElement>('#title')!
-  const body = document.querySelector<HTMLTextAreaElement>('#body')!
-  const preview = document.querySelector<HTMLElement>('#preview')!
-  const togglePreview = document.querySelector<HTMLButtonElement>('#toggle-preview')!
+  const mdButtons = Array.from(form.querySelectorAll<HTMLButtonElement>('[data-md]'))
+  const body = createNoteEditor(document.querySelector<HTMLElement>('#body')!, (editor) => {
+    for (const button of mdButtons) {
+      button.classList.toggle('is-on', isActionOn(editor, button.dataset.md ?? ''))
+    }
+  })
   const fontSmaller = document.querySelector<HTMLButtonElement>('#font-smaller')!
   const fontLarger = document.querySelector<HTMLButtonElement>('#font-larger')!
   const saveTarget = document.querySelector<HTMLElement>('#save-target')!
@@ -259,7 +205,6 @@ window.addEventListener('DOMContentLoaded', () => {
     local?: boolean
   }
 
-  let previewOn = false
   let editingId: string | null = null
   let editingLocal = false
   let saveTo: SaveTo = loadSaveTo()
@@ -361,25 +306,23 @@ window.addEventListener('DOMContentLoaded', () => {
     editingId = null
     editingLocal = false
     title.value = ''
-    body.value = ''
+    setMarkdown(body, '')
     notesSearch.value = ''
     if (isCloudSession()) saveTo = loadSaveTo()
     else saveTo = 'local'
     syncSaveTargetUi()
     refreshEditingLabel()
-    void setPreviewMode(false)
   }
 
   async function loadNoteIntoComposer(entry: ListedNote) {
     editingId = entry.id
     editingLocal = Boolean(entry.local) || (await isLocalNoteId(entry.id))
     title.value = entry.title ?? ''
-    body.value = entry.bodyMd
+    setMarkdown(body, entry.bodyMd)
     notesSearch.value = ''
     setSaveTo(editingLocal ? 'local' : 'cloud')
     refreshEditingLabel()
-    void setPreviewMode(false)
-    body.focus()
+    body.commands.focus()
     setStatus(
       status,
       editingLocal ? 'Editing local note.' : 'Editing existing note.',
@@ -521,41 +464,14 @@ window.addEventListener('DOMContentLoaded', () => {
     })
   })
 
-  form.querySelectorAll<HTMLButtonElement>('[data-md]').forEach((button) => {
+  for (const button of mdButtons) {
+    // Keep the caret in the editor; a click would otherwise blur it first.
+    button.addEventListener('mousedown', (event) => event.preventDefault())
     button.addEventListener('click', () => {
       const action = button.dataset.md
-      if (!action || previewOn) return
-      applyMarkdownAction(body, action)
+      if (action) applyMarkdownAction(body, action)
     })
-  })
-
-  async function setPreviewMode(on: boolean) {
-    previewOn = on
-    body.hidden = on
-    preview.hidden = !on
-    body.required = !on
-    togglePreview.classList.toggle('is-on', on)
-    togglePreview.textContent = on ? 'Edit' : 'Preview'
-    if (on) await renderPreview(body.value, preview)
   }
-
-  togglePreview.addEventListener('click', () => {
-    void setPreviewMode(!previewOn)
-  })
-
-  body.addEventListener('keydown', (event) => {
-    if (!(event.ctrlKey || event.metaKey) || previewOn) return
-    if (event.key.toLowerCase() === 'b') {
-      event.preventDefault()
-      applyMarkdownAction(body, 'bold')
-    } else if (event.key.toLowerCase() === 'i') {
-      event.preventDefault()
-      applyMarkdownAction(body, 'italic')
-    } else if (event.key.toLowerCase() === 'e') {
-      event.preventDefault()
-      void setPreviewMode(true)
-    }
-  })
 
   signOut.addEventListener('click', () => {
     saveSession({ noteGrantToken: '', localMode: false })
@@ -580,7 +496,7 @@ window.addEventListener('DOMContentLoaded', () => {
     syncSaveTargetUi()
     showScreen(gate, app, true)
     setStatus(status, 'Saving on this device.', 'idle')
-    body.focus()
+    body.commands.focus()
   })
 
   notesSearch.addEventListener('focus', () => openNotesMenu())
@@ -605,7 +521,7 @@ window.addEventListener('DOMContentLoaded', () => {
     clearComposer()
     setMenuOpen(false)
     setStatus(status, 'New note.', 'idle')
-    body.focus()
+    body.commands.focus()
   })
 
   document.addEventListener('pointerdown', (event) => {
@@ -625,7 +541,7 @@ window.addEventListener('DOMContentLoaded', () => {
     clearComposer()
     setMenuOpen(false)
     setStatus(status, 'New note.', 'idle')
-    body.focus()
+    body.commands.focus()
   })
 
   newWindow.addEventListener('click', () => openNoteWindow())
@@ -685,7 +601,7 @@ window.addEventListener('DOMContentLoaded', () => {
       syncSaveTargetUi()
       showScreen(gate, app, true)
       setStatus(status, 'Signed in.', 'ok')
-      body.focus()
+      body.commands.focus()
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setStatus(gateStatus, networkErrorMessage(error), 'error')
@@ -713,14 +629,13 @@ window.addEventListener('DOMContentLoaded', () => {
     nextCursor = null
     syncSaveTargetUi()
     refreshEditingLabel()
-    if (previewOn) await renderPreview(body.value, preview)
     setStatus(status, 'Saved on this device.', 'ok')
   }
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault()
     const session = loadSession()
-    const text = body.value.trim()
+    const text = markdownOf(body).trim()
 
     if (!isUnlocked(session)) {
       showScreen(gate, app, false)
@@ -792,8 +707,7 @@ window.addEventListener('DOMContentLoaded', () => {
       editingLocal = false
       syncSaveTargetUi()
       refreshEditingLabel()
-      if (previewOn) await renderPreview(body.value, preview)
-      setStatus(status, 'Saved to medaily.', 'ok')
+        setStatus(status, 'Saved to medaily.', 'ok')
       nextCursor = null
       listedNotes = []
       refreshEditingLabel()
