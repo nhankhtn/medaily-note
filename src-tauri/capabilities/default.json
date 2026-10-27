@@ -8,6 +8,8 @@
     "core:webview:allow-create-webview-window",
     "core:window:allow-set-icon",
     "opener:default",
+    "sql:default",
+    "sql:allow-execute",
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://medaily.id.vn/*" }]

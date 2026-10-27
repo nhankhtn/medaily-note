@@ -108,6 +108,13 @@ body {
   min-height: 2.5rem;
 }
 
+.gate-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .gate-status {
   margin: 0;
   min-height: 1.2em;
@@ -517,9 +524,45 @@ textarea:focus {
 .actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.55rem;
   padding: 0.15rem 0.2rem 0.1rem;
+}
+
+.actions #status {
+  margin-right: auto;
+}
+
+.save-target {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--wash);
+}
+
+.save-target-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 0.3rem 0.65rem;
+  cursor: pointer;
+}
+
+.save-target-btn.is-active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.notes-results .note-local {
+  margin-left: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--accent);
 }
 
 #status {

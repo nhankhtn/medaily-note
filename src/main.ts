@@ -4,10 +4,19 @@ import { fetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { marked } from 'marked'
 import appIcon from './assets/app-icon.png'
+import {
+  ensureLocalNotesDb,
+  isLocalNoteId,
+  LOCAL_PAGE,
+  localNotesPage,
+  upsertLocalNote,
+  type NotesCursor as LocalNotesCursor,
+} from './local-notes'
 
 marked.setOptions({ gfm: true, breaks: true })
 
 const STORAGE_KEY = 'medaily.quicknote.session'
+const SAVE_TO_KEY = 'medaily.quicknote.saveTo'
 const FONT_KEY = 'medaily.quicknote.fontSize'
 const API_BASE = 'https://medaily.id.vn'
 const FONT_MIN = 0.8
@@ -17,23 +26,43 @@ const FONT_DEFAULT = 0.95
 
 type Session = {
   noteGrantToken: string
+  localMode: boolean
 }
 
 function loadSession(): Session {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { noteGrantToken: '' }
+    if (!raw) return { noteGrantToken: '', localMode: false }
     const parsed = JSON.parse(raw) as Partial<Session>
     return {
       noteGrantToken: typeof parsed.noteGrantToken === 'string' ? parsed.noteGrantToken : '',
+      localMode: parsed.localMode === true,
     }
   } catch {
-    return { noteGrantToken: '' }
+    return { noteGrantToken: '', localMode: false }
   }
 }
 
 function saveSession(session: Session) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+}
+
+function isCloudSession(session = loadSession()): boolean {
+  return Boolean(session.noteGrantToken.trim())
+}
+
+function isUnlocked(session = loadSession()): boolean {
+  return isCloudSession(session) || session.localMode
+}
+
+type SaveTo = 'cloud' | 'local'
+
+function loadSaveTo(): SaveTo {
+  return localStorage.getItem(SAVE_TO_KEY) === 'local' ? 'local' : 'cloud'
+}
+
+function persistSaveTo(value: SaveTo) {
+  localStorage.setItem(SAVE_TO_KEY, value)
 }
 
 function loadFontSize(): number {
@@ -55,9 +84,9 @@ function setStatus(el: HTMLElement, message: string, kind: 'idle' | 'ok' | 'erro
   el.classList.toggle('is-error', kind === 'error')
 }
 
-function showScreen(gate: HTMLElement, app: HTMLElement, signedIn: boolean) {
-  gate.hidden = signedIn
-  app.hidden = !signedIn
+function showScreen(gate: HTMLElement, app: HTMLElement, unlocked: boolean) {
+  gate.hidden = unlocked
+  app.hidden = !unlocked
 }
 
 async function applyWindowIcon() {
@@ -199,6 +228,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const gate = document.querySelector<HTMLElement>('#gate')!
   const app = document.querySelector<HTMLElement>('#app')!
   const signIn = document.querySelector<HTMLButtonElement>('#sign-in')!
+  const useLocal = document.querySelector<HTMLButtonElement>('#use-local')!
   const signOut = document.querySelector<HTMLButtonElement>('#sign-out')!
   const newWindow = document.querySelector<HTMLButtonElement>('#new-window')!
   const newNote = document.querySelector<HTMLButtonElement>('#new-note')!
@@ -217,6 +247,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const togglePreview = document.querySelector<HTMLButtonElement>('#toggle-preview')!
   const fontSmaller = document.querySelector<HTMLButtonElement>('#font-smaller')!
   const fontLarger = document.querySelector<HTMLButtonElement>('#font-larger')!
+  const saveTarget = document.querySelector<HTMLElement>('#save-target')!
   const saveNote = document.querySelector<HTMLButtonElement>('#save-note')!
   const status = document.querySelector<HTMLElement>('#status')!
 
@@ -225,18 +256,43 @@ window.addEventListener('DOMContentLoaded', () => {
     title: string
     bodyMd: string
     updatedAt: string
+    local?: boolean
   }
-
-  type NotesCursor = { updatedAt: string; id: string }
 
   let previewOn = false
   let editingId: string | null = null
+  let editingLocal = false
+  let saveTo: SaveTo = loadSaveTo()
   let listedNotes: ListedNote[] = []
-  let nextCursor: NotesCursor | null = null
+  let nextCursor: LocalNotesCursor | null = null
   let activeQuery = ''
   let loadingNotes = false
   let searchTimer: number | null = null
   let fontSize = applyFontSize(loadFontSize())
+
+  function syncSaveTargetUi() {
+    const cloud = isCloudSession()
+    saveTarget.hidden = !cloud
+    if (!cloud) {
+      saveTo = 'local'
+    } else if (editingLocal) {
+      saveTo = 'local'
+    }
+    Array.from(saveTarget.querySelectorAll<HTMLButtonElement>('[data-save-to]')).forEach(
+      (button) => {
+        const value = button.dataset.saveTo as SaveTo
+        button.classList.toggle('is-active', value === saveTo)
+        button.disabled = editingLocal && value === 'cloud'
+      },
+    )
+  }
+
+  function setSaveTo(value: SaveTo) {
+    if (editingLocal && value === 'cloud') return
+    saveTo = value
+    if (isCloudSession() && !editingLocal) persistSaveTo(value)
+    syncSaveTargetUi()
+  }
 
   function snippet(text: string): string {
     return text.replace(/\s+/g, ' ').trim().slice(0, 80)
@@ -271,11 +327,17 @@ window.addEventListener('DOMContentLoaded', () => {
       button.dataset.id = entry.id
       if (entry.id === editingId) button.classList.add('is-active')
       button.innerHTML = `<span class="note-title"></span><span class="note-meta"></span>`
-      button.querySelector('.note-title')!.textContent = noteLabel(entry)
+      const titleEl = button.querySelector('.note-title')!
+      titleEl.textContent = noteLabel(entry)
+      if (entry.local) {
+        const badge = document.createElement('span')
+        badge.className = 'note-local'
+        badge.textContent = 'Local'
+        titleEl.append(badge)
+      }
       button.querySelector('.note-meta')!.textContent = noteMeta(entry)
       button.addEventListener('click', () => {
-        loadNoteIntoComposer(entry)
-        setMenuOpen(false)
+        void loadNoteIntoComposer(entry).then(() => setMenuOpen(false))
       })
       item.append(button)
       notesResults.append(item)
@@ -297,27 +359,36 @@ window.addEventListener('DOMContentLoaded', () => {
 
   function clearComposer() {
     editingId = null
+    editingLocal = false
     title.value = ''
     body.value = ''
     notesSearch.value = ''
+    if (isCloudSession()) saveTo = loadSaveTo()
+    else saveTo = 'local'
+    syncSaveTargetUi()
     refreshEditingLabel()
     void setPreviewMode(false)
   }
 
-  function loadNoteIntoComposer(entry: ListedNote) {
+  async function loadNoteIntoComposer(entry: ListedNote) {
     editingId = entry.id
+    editingLocal = Boolean(entry.local) || (await isLocalNoteId(entry.id))
     title.value = entry.title ?? ''
     body.value = entry.bodyMd
     notesSearch.value = ''
+    setSaveTo(editingLocal ? 'local' : 'cloud')
     refreshEditingLabel()
     void setPreviewMode(false)
     body.focus()
-    setStatus(status, 'Editing existing note.', 'idle')
+    setStatus(
+      status,
+      editingLocal ? 'Editing local note.' : 'Editing existing note.',
+      'idle',
+    )
   }
 
   async function fetchNotesPage(opts: { reset: boolean; q: string }) {
-    const bearer = loadSession().noteGrantToken.trim()
-    if (!bearer) {
+    if (!isUnlocked()) {
       showScreen(gate, app, false)
       return
     }
@@ -328,6 +399,35 @@ window.addEventListener('DOMContentLoaded', () => {
     notesStatus.textContent = opts.reset ? 'Searching…' : 'Loading more…'
 
     try {
+      if (!isCloudSession()) {
+        const page = await localNotesPage({
+          q: opts.q,
+          cursor: opts.reset ? null : nextCursor,
+          limit: LOCAL_PAGE,
+        })
+        const localEntries = page.entries.map((entry) => ({ ...entry, local: true }))
+        if (opts.reset) listedNotes = localEntries
+        else {
+          const seen = new Set(listedNotes.map((note) => note.id))
+          for (const entry of localEntries) {
+            if (!seen.has(entry.id)) listedNotes.push(entry)
+          }
+        }
+        nextCursor = page.nextCursor
+        activeQuery = opts.q
+        renderNotesResults(opts.reset)
+        refreshEditingLabel()
+        if (listedNotes.length === 0) {
+          notesStatus.textContent = opts.q ? 'No matches.' : 'No local notes yet.'
+        } else if (nextCursor) {
+          notesStatus.textContent = 'Scroll for more…'
+        } else {
+          notesStatus.textContent = 'Saved on this device'
+        }
+        return
+      }
+
+      const bearer = loadSession().noteGrantToken.trim()
       const params = new URLSearchParams({ limit: '20' })
       if (opts.q) params.set('q', opts.q)
       if (!opts.reset && nextCursor) params.set('cursor', JSON.stringify(nextCursor))
@@ -338,13 +438,14 @@ window.addEventListener('DOMContentLoaded', () => {
       const payload = (await response.json().catch(() => null)) as {
         ok?: boolean
         entries?: ListedNote[]
-        nextCursor?: NotesCursor | null
+        nextCursor?: LocalNotesCursor | null
         error?: string
       } | null
 
       if (!response.ok || !payload?.ok || !payload.entries) {
         if (payload?.error === 'unauthorized') {
-          saveSession({ noteGrantToken: '' })
+          saveSession({ noteGrantToken: '', localMode: false })
+          syncSaveTargetUi()
           showScreen(gate, app, false)
           setStatus(gateStatus, 'Session expired — sign in again.', 'error')
           return
@@ -353,11 +454,20 @@ window.addEventListener('DOMContentLoaded', () => {
         return
       }
 
-      if (opts.reset) listedNotes = payload.entries
-      else {
+      const localHits = (
+        await localNotesPage({ q: opts.q, limit: LOCAL_PAGE })
+      ).entries.map((entry) => ({ ...entry, local: true as const }))
+
+      if (opts.reset) {
+        const cloudIds = new Set(payload.entries.map((entry) => entry.id))
+        listedNotes = [
+          ...localHits.filter((entry) => !cloudIds.has(entry.id)),
+          ...payload.entries.map((entry) => ({ ...entry, local: false })),
+        ]
+      } else {
         const seen = new Set(listedNotes.map((note) => note.id))
         for (const entry of payload.entries) {
-          if (!seen.has(entry.id)) listedNotes.push(entry)
+          if (!seen.has(entry.id)) listedNotes.push({ ...entry, local: false })
         }
       }
       nextCursor = payload.nextCursor ?? null
@@ -392,8 +502,24 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  showScreen(gate, app, Boolean(loadSession().noteGrantToken))
+  showScreen(gate, app, isUnlocked())
+  if (!isCloudSession()) saveTo = 'local'
+  syncSaveTargetUi()
   refreshEditingLabel()
+  if (loadSession().localMode && !isCloudSession()) {
+    signOut.title = 'Back to start'
+    signOut.setAttribute('aria-label', 'Back to start')
+  }
+  void ensureLocalNotesDb().catch((error) => {
+    console.error('local notes db', error)
+  })
+
+  saveTarget.querySelectorAll<HTMLButtonElement>('[data-save-to]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const value = button.dataset.saveTo
+      if (value === 'local' || value === 'cloud') setSaveTo(value)
+    })
+  })
 
   form.querySelectorAll<HTMLButtonElement>('[data-md]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -432,16 +558,29 @@ window.addEventListener('DOMContentLoaded', () => {
   })
 
   signOut.addEventListener('click', () => {
-    saveSession({ noteGrantToken: '' })
+    saveSession({ noteGrantToken: '', localMode: false })
     listedNotes = []
     nextCursor = null
     notesResults.replaceChildren()
     setMenuOpen(false)
     clearComposer()
+    syncSaveTargetUi()
     notesStatus.textContent = ''
     showScreen(gate, app, false)
     setStatus(gateStatus, '', 'idle')
     setStatus(status, '', 'idle')
+  })
+
+  useLocal.addEventListener('click', () => {
+    saveSession({ noteGrantToken: '', localMode: true })
+    signOut.title = 'Back to start'
+    signOut.setAttribute('aria-label', 'Back to start')
+    saveTo = 'local'
+    editingLocal = false
+    syncSaveTargetUi()
+    showScreen(gate, app, true)
+    setStatus(status, 'Saving on this device.', 'idle')
+    body.focus()
   })
 
   notesSearch.addEventListener('focus', () => openNotesMenu())
@@ -538,7 +677,12 @@ window.addEventListener('DOMContentLoaded', () => {
         signInAbort.signal,
       )
 
-      saveSession({ noteGrantToken })
+      saveSession({ noteGrantToken, localMode: false })
+      signOut.title = 'Sign out'
+      signOut.setAttribute('aria-label', 'Sign out')
+      saveTo = loadSaveTo()
+      editingLocal = false
+      syncSaveTargetUi()
       showScreen(gate, app, true)
       setStatus(status, 'Signed in.', 'ok')
       body.focus()
@@ -550,14 +694,37 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   })
 
+  async function saveLocalDraft(text: string) {
+    const titleText =
+      title.value.trim() ||
+      text
+        .split('\n')
+        .map((line) => line.replace(/^#+\s*/, '').trim())
+        .find((line) => line.length > 0) ||
+      'Untitled'
+    const saved = await upsertLocalNote({
+      id: editingLocal ? editingId : null,
+      title: titleText.slice(0, 300),
+      bodyMd: text,
+    })
+    editingId = saved.id
+    editingLocal = true
+    listedNotes = []
+    nextCursor = null
+    syncSaveTargetUi()
+    refreshEditingLabel()
+    if (previewOn) await renderPreview(body.value, preview)
+    setStatus(status, 'Saved on this device.', 'ok')
+  }
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault()
-    const bearer = loadSession().noteGrantToken.trim()
+    const session = loadSession()
     const text = body.value.trim()
 
-    if (!bearer) {
+    if (!isUnlocked(session)) {
       showScreen(gate, app, false)
-      setStatus(gateStatus, 'Sign in before saving.', 'error')
+      setStatus(gateStatus, 'Choose sign-in or continue on this device.', 'error')
       return
     }
     if (!text) {
@@ -568,6 +735,17 @@ window.addEventListener('DOMContentLoaded', () => {
     saveNote.disabled = true
     setStatus(status, 'Saving…', 'idle')
 
+    const preferLocal = !isCloudSession(session) || saveTo === 'local' || editingLocal
+    if (preferLocal) {
+      try {
+        await saveLocalDraft(text)
+      } finally {
+        saveNote.disabled = false
+      }
+      return
+    }
+
+    const bearer = session.noteGrantToken.trim()
     const controller = new AbortController()
     const timer = window.setTimeout(() => controller.abort(), 15_000)
 
@@ -579,7 +757,7 @@ window.addEventListener('DOMContentLoaded', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          id: editingId ?? undefined,
+          id: editingId && !editingLocal ? editingId : undefined,
           bodyMd: text,
           title: title.value.trim() || undefined,
         }),
@@ -592,7 +770,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
       if (!response.ok || !payload?.ok) {
         if (payload?.error === 'unauthorized') {
-          saveSession({ noteGrantToken: '' })
+          saveSession({ noteGrantToken: '', localMode: false })
+          syncSaveTargetUi()
           showScreen(gate, app, false)
           setStatus(gateStatus, 'Session expired — sign in again.', 'error')
           return
@@ -610,9 +789,11 @@ window.addEventListener('DOMContentLoaded', () => {
       }
 
       editingId = payload.id ?? editingId
+      editingLocal = false
+      syncSaveTargetUi()
       refreshEditingLabel()
       if (previewOn) await renderPreview(body.value, preview)
-      setStatus(status, 'Saved.', 'ok')
+      setStatus(status, 'Saved to medaily.', 'ok')
       nextCursor = null
       listedNotes = []
       refreshEditingLabel()
