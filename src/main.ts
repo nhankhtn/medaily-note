@@ -216,6 +216,8 @@ window.addEventListener('DOMContentLoaded', () => {
   let saveTo: SaveTo = loadSaveTo()
   let listedNotes: ListedNote[] = []
   let nextCursor: LocalNotesCursor | null = null
+  // Which source nextCursor belongs to; cloud listing falls back to local when offline.
+  let listingSource: 'cloud' | 'local' = 'local'
   let activeQuery = ''
   let loadingNotes = false
   let searchTimer: number | null = null
@@ -347,32 +349,43 @@ window.addEventListener('DOMContentLoaded', () => {
     loadingNotes = true
     notesStatus.textContent = opts.reset ? 'Searching…' : 'Loading more…'
 
+    async function showLocalPage(offlineReason?: string) {
+      const page = await localNotesPage({
+        q: opts.q,
+        cursor: opts.reset ? null : nextCursor,
+        limit: LOCAL_PAGE,
+      })
+      const localEntries = page.entries.map((entry) => ({ ...entry, local: true }))
+      if (opts.reset) listedNotes = localEntries
+      else {
+        const seen = new Set(listedNotes.map((note) => note.id))
+        for (const entry of localEntries) {
+          if (!seen.has(entry.id)) listedNotes.push(entry)
+        }
+      }
+      nextCursor = page.nextCursor
+      listingSource = 'local'
+      activeQuery = opts.q
+      renderNotesResults(opts.reset)
+      refreshEditingLabel()
+      if (listedNotes.length === 0) {
+        notesStatus.textContent = offlineReason
+          ? `${offlineReason} No local notes.`
+          : opts.q
+            ? 'No matches.'
+            : 'No local notes yet.'
+      } else if (nextCursor) {
+        notesStatus.textContent = 'Scroll for more…'
+      } else {
+        notesStatus.textContent = offlineReason
+          ? `${offlineReason} Showing notes on this device.`
+          : 'Saved on this device'
+      }
+    }
+
     try {
-      if (!isCloudSession()) {
-        const page = await localNotesPage({
-          q: opts.q,
-          cursor: opts.reset ? null : nextCursor,
-          limit: LOCAL_PAGE,
-        })
-        const localEntries = page.entries.map((entry) => ({ ...entry, local: true }))
-        if (opts.reset) listedNotes = localEntries
-        else {
-          const seen = new Set(listedNotes.map((note) => note.id))
-          for (const entry of localEntries) {
-            if (!seen.has(entry.id)) listedNotes.push(entry)
-          }
-        }
-        nextCursor = page.nextCursor
-        activeQuery = opts.q
-        renderNotesResults(opts.reset)
-        refreshEditingLabel()
-        if (listedNotes.length === 0) {
-          notesStatus.textContent = opts.q ? 'No matches.' : 'No local notes yet.'
-        } else if (nextCursor) {
-          notesStatus.textContent = 'Scroll for more…'
-        } else {
-          notesStatus.textContent = 'Saved on this device'
-        }
+      if (!isCloudSession() || (!opts.reset && listingSource === 'local')) {
+        await showLocalPage()
         return
       }
 
@@ -381,9 +394,24 @@ window.addEventListener('DOMContentLoaded', () => {
       if (opts.q) params.set('q', opts.q)
       if (!opts.reset && nextCursor) params.set('cursor', JSON.stringify(nextCursor))
 
-      const response = await fetch(`${API_BASE}/api/external/grant/journal?${params}`, {
-        headers: { Authorization: `Bearer ${bearer}` },
-      })
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(), 8_000)
+      let response: Response
+      try {
+        response = await fetch(`${API_BASE}/api/external/grant/journal?${params}`, {
+          headers: { Authorization: `Bearer ${bearer}` },
+          signal: controller.signal,
+        })
+      } catch (error) {
+        const reason =
+          error instanceof DOMException && error.name === 'AbortError'
+            ? 'Timed out reaching medaily.id.vn.'
+            : networkErrorMessage(error)
+        await showLocalPage(reason)
+        return
+      } finally {
+        window.clearTimeout(timer)
+      }
       const payload = (await response.json().catch(() => null)) as {
         ok?: boolean
         entries?: ListedNote[]
@@ -399,7 +427,7 @@ window.addEventListener('DOMContentLoaded', () => {
           setStatus(gateStatus, 'Session expired — sign in again.', 'error')
           return
         }
-        notesStatus.textContent = 'Could not load notes.'
+        await showLocalPage('Could not load cloud notes.')
         return
       }
 
@@ -420,6 +448,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       }
       nextCursor = payload.nextCursor ?? null
+      listingSource = 'cloud'
       activeQuery = opts.q
       renderNotesResults(opts.reset)
       refreshEditingLabel()
