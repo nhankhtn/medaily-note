@@ -25,6 +25,7 @@ const TightTaskList = Extension.create({
 export function createNoteEditor(
   element: HTMLElement,
   onTransaction: (editor: Editor) => void,
+  onChange?: () => void,
 ): Editor {
   return new Editor({
     element,
@@ -43,6 +44,8 @@ export function createNoteEditor(
     ],
     editorProps: { attributes: { class: 'md-doc', 'aria-label': 'Note' } },
     onTransaction: ({ editor }) => onTransaction(editor),
+    // Fires only for user edits: setMarkdown passes emitUpdate: false.
+    onUpdate: () => onChange?.(),
   })
 }
 

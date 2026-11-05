@@ -22,6 +22,8 @@ const FONT_MIN = 0.8
 const FONT_MAX = 1.45
 const FONT_STEP = 0.05
 const FONT_DEFAULT = 0.95
+/** Idle time after the last keystroke before the note saves itself. */
+const AUTOSAVE_DELAY_MS = 3_000
 
 type Session = {
   noteGrantToken: string
@@ -192,11 +194,15 @@ window.addEventListener('DOMContentLoaded', () => {
   const form = document.querySelector<HTMLFormElement>('#note-form')!
   const title = document.querySelector<HTMLInputElement>('#title')!
   const mdButtons = Array.from(form.querySelectorAll<HTMLButtonElement>('[data-md]'))
-  const body = createNoteEditor(document.querySelector<HTMLElement>('#body')!, (editor) => {
-    for (const button of mdButtons) {
-      button.classList.toggle('is-on', isActionOn(editor, button.dataset.md ?? ''))
-    }
-  })
+  const body = createNoteEditor(
+    document.querySelector<HTMLElement>('#body')!,
+    (editor) => {
+      for (const button of mdButtons) {
+        button.classList.toggle('is-on', isActionOn(editor, button.dataset.md ?? ''))
+      }
+    },
+    () => scheduleAutosave(),
+  )
   const fontSmaller = document.querySelector<HTMLButtonElement>('#font-smaller')!
   const fontLarger = document.querySelector<HTMLButtonElement>('#font-larger')!
   const saveTarget = document.querySelector<HTMLElement>('#save-target')!
@@ -222,6 +228,48 @@ window.addEventListener('DOMContentLoaded', () => {
   let loadingNotes = false
   let searchTimer: number | null = null
   let fontSize = applyFontSize(loadFontSize())
+
+  // The note a save writes to. A new object per composer, so a save still in
+  // flight after the user switched notes updates its own note, not the new one.
+  type SaveTarget = { id: string | null; local: boolean }
+  type SaveJob = {
+    target: SaveTarget
+    snapshot: string
+    title: string
+    text: string
+    toLocal: boolean
+    bearer: string
+    auto: boolean
+  }
+  let target: SaveTarget = { id: null, local: false }
+  let savedSnapshot = composerSnapshot()
+  let autosaveTimer: number | null = null
+  // Saves run one at a time, so a new note's first save hands its id to the next.
+  let saveChain: Promise<void> = Promise.resolve()
+
+  function composerSnapshot(): string {
+    return `${title.value.trim()}\u0000${markdownOf(body).trim()}`
+  }
+
+  function cancelAutosave() {
+    if (autosaveTimer !== null) window.clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+
+  function scheduleAutosave() {
+    cancelAutosave()
+    autosaveTimer = window.setTimeout(() => {
+      autosaveTimer = null
+      void queueSave(true)
+    }, AUTOSAVE_DELAY_MS)
+  }
+
+  /** Composer now shows `editingId` as stored: nothing to autosave yet. */
+  function resetSaveTarget() {
+    cancelAutosave()
+    target = { id: editingId, local: editingLocal }
+    savedSnapshot = composerSnapshot()
+  }
 
   function syncSaveTargetUi() {
     const cloud = isCloudSession()
@@ -311,10 +359,12 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function clearComposer() {
+    void queueSave(true)
     editingId = null
     editingLocal = false
     title.value = ''
     setMarkdown(body, '')
+    resetSaveTarget()
     notesSearch.value = ''
     if (isCloudSession()) saveTo = loadSaveTo()
     else saveTo = 'local'
@@ -323,10 +373,13 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadNoteIntoComposer(entry: ListedNote) {
+    void queueSave(true)
+    const local = Boolean(entry.local) || (await isLocalNoteId(entry.id))
     editingId = entry.id
-    editingLocal = Boolean(entry.local) || (await isLocalNoteId(entry.id))
+    editingLocal = local
     title.value = entry.title ?? ''
     setMarkdown(body, entry.bodyMd)
+    resetSaveTarget()
     notesSearch.value = ''
     setSaveTo(editingLocal ? 'local' : 'cloud')
     refreshEditingLabel()
@@ -509,6 +562,8 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   signOut.addEventListener('click', () => {
+    // Queue the pending edit while the session token is still there.
+    void queueSave(true)
     saveSession({ noteGrantToken: '', localMode: false })
     listedNotes = []
     nextCursor = null
@@ -645,57 +700,42 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   })
 
-  async function saveLocalDraft(text: string) {
-    const titleText =
-      title.value.trim() ||
+  function fallbackTitle(titleText: string, text: string): string {
+    return (
+      titleText ||
       text
         .split('\n')
         .map((line) => line.replace(/^#+\s*/, '').trim())
         .find((line) => line.length > 0) ||
       'Untitled'
-    const saved = await upsertLocalNote({
-      id: editingLocal ? editingId : null,
-      title: titleText.slice(0, 300),
-      bodyMd: text,
-    })
-    editingId = saved.id
-    editingLocal = true
-    listedNotes = []
-    nextCursor = null
-    syncSaveTargetUi()
-    refreshEditingLabel()
-    setStatus(status, 'Saved on this device.', 'ok')
+    ).slice(0, 300)
   }
 
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault()
-    const session = loadSession()
-    const text = markdownOf(body).trim()
+  /** Records where the job landed; touches the composer only if it still shows that note. */
+  function applySaved(job: SaveJob, id: string, local: boolean) {
+    job.target.id = id
+    job.target.local = local
+    nextCursor = null
+    listedNotes = []
+    if (job.target !== target) return
+    editingId = id
+    editingLocal = local
+    syncSaveTargetUi()
+    refreshEditingLabel()
+  }
 
-    if (!isUnlocked(session)) {
-      showScreen(gate, app, false)
-      setStatus(gateStatus, 'Choose sign-in or continue on this device.', 'error')
-      return
-    }
-    if (!text) {
-      setStatus(status, 'Write something before saving.', 'error')
-      return
-    }
+  async function saveLocal(job: SaveJob) {
+    const saved = await upsertLocalNote({
+      id: job.target.local ? job.target.id : null,
+      title: fallbackTitle(job.title, job.text),
+      bodyMd: job.text,
+    })
+    applySaved(job, saved.id, true)
+    setStatus(status, job.auto ? 'Auto-saved on this device.' : 'Saved on this device.', 'ok')
+  }
 
-    saveNote.disabled = true
-    setStatus(status, 'Saving…', 'idle')
-
-    const preferLocal = !isCloudSession(session) || saveTo === 'local' || editingLocal
-    if (preferLocal) {
-      try {
-        await saveLocalDraft(text)
-      } finally {
-        saveNote.disabled = false
-      }
-      return
-    }
-
-    const bearer = session.noteGrantToken.trim()
+  /** Returns false when the save did not land. */
+  async function saveCloud(job: SaveJob): Promise<boolean> {
     const controller = new AbortController()
     const timer = window.setTimeout(() => controller.abort(), 15_000)
 
@@ -703,13 +743,13 @@ window.addEventListener('DOMContentLoaded', () => {
       const response = await fetch(`${API_BASE}/api/external/grant/journal`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${bearer}`,
+          Authorization: `Bearer ${job.bearer}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          id: editingId && !editingLocal ? editingId : undefined,
-          bodyMd: text,
-          title: title.value.trim() || undefined,
+          id: job.target.id && !job.target.local ? job.target.id : undefined,
+          bodyMd: job.text,
+          title: job.title || undefined,
         }),
         signal: controller.signal,
       })
@@ -724,7 +764,7 @@ window.addEventListener('DOMContentLoaded', () => {
           syncSaveTargetUi()
           showScreen(gate, app, false)
           setStatus(gateStatus, 'Session expired — sign in again.', 'error')
-          return
+          return false
         }
         const reason =
           payload?.error === 'rate_limited'
@@ -735,26 +775,95 @@ window.addEventListener('DOMContentLoaded', () => {
                 ? 'That note is gone — start a new one.'
                 : `Save failed (${response.status}).`
         setStatus(status, reason, 'error')
-        return
+        return false
       }
 
-      editingId = payload.id ?? editingId
-      editingLocal = false
-      syncSaveTargetUi()
-      refreshEditingLabel()
-        setStatus(status, 'Saved to medaily.', 'ok')
-      nextCursor = null
-      listedNotes = []
-      refreshEditingLabel()
+      applySaved(job, payload.id ?? job.target.id ?? '', false)
+      setStatus(status, job.auto ? 'Auto-saved to medaily.' : 'Saved to medaily.', 'ok')
+      return true
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         setStatus(status, 'Timed out reaching the API.', 'error')
       } else {
         setStatus(status, networkErrorMessage(error), 'error')
       }
+      return false
     } finally {
       window.clearTimeout(timer)
+    }
+  }
+
+  async function runSave(job: SaveJob) {
+    saveNote.disabled = true
+    if (!job.auto) setStatus(status, 'Saving…', 'idle')
+    let ok = false
+    try {
+      if (job.toLocal) {
+        await saveLocal(job)
+        ok = true
+      } else {
+        ok = await saveCloud(job)
+      }
+    } catch (error) {
+      console.error('runSave.saveLocal', error)
+      setStatus(status, `Save failed: ${String(error)}`, 'error')
+    } finally {
       saveNote.disabled = false
     }
+    // Mark it dirty again so the next keystroke (or Save) retries.
+    if (!ok && job.target === target && savedSnapshot === job.snapshot) savedSnapshot = ''
+  }
+
+  /**
+   * Captures the composer now and queues it behind any save in flight.
+   * Auto saves skip silently when nothing changed, the note is empty, or the app is locked.
+   */
+  function queueSave(auto: boolean): Promise<void> {
+    cancelAutosave()
+    const session = loadSession()
+    const text = markdownOf(body).trim()
+    const snapshot = composerSnapshot()
+
+    if (!isUnlocked(session)) {
+      if (!auto) {
+        showScreen(gate, app, false)
+        setStatus(gateStatus, 'Choose sign-in or continue on this device.', 'error')
+      }
+      return saveChain
+    }
+    if (!text) {
+      if (!auto) setStatus(status, 'Write something before saving.', 'error')
+      return saveChain
+    }
+    if (auto && snapshot === savedSnapshot) return saveChain
+
+    const job: SaveJob = {
+      target,
+      snapshot,
+      title: title.value.trim(),
+      text,
+      toLocal: !isCloudSession(session) || saveTo === 'local' || target.local,
+      bearer: session.noteGrantToken.trim(),
+      auto,
+    }
+    savedSnapshot = snapshot
+    saveChain = saveChain.then(() => runSave(job))
+    return saveChain
+  }
+
+  title.addEventListener('input', () => scheduleAutosave())
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
+    void queueSave(false)
+  })
+
+  // Hidden or closing: save what is pending instead of waiting out the timer.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) void queueSave(true)
+  })
+
+  void getCurrentWindow().onCloseRequested(async () => {
+    await queueSave(true)
   })
 })
