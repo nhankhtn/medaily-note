@@ -1,6 +1,6 @@
 [package]
 name = "medaily-note"
-version = "0.1.2"
+version = "0.1.3"
 description = "Medaily quick note"
 authors = ["medaily"]
 edition = "2024"
